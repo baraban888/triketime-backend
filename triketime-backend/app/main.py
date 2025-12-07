@@ -1,5 +1,7 @@
 from flask import Flask
 from app.api.health import health_bp
+from app.api.health import health_bp
+from app.api.shifts import shifts_bp
 
 
 def create_app():
@@ -7,7 +9,8 @@ def create_app():
 
     # Register blueprints
     app.register_blueprint(health_bp)
-
+    app.register_blueprint(shifts_bp)
+    
     @app.route("/")
     def index():
         return {"message": "TrikeTime Backend is running"}
