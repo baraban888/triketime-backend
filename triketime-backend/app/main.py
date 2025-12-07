@@ -2,7 +2,9 @@ from flask import Flask
 from app.api.health import health_bp
 from app.api.health import health_bp
 from app.api.shifts import shifts_bp
-
+from dotenv import load_dotenv
+load_dotenv()
+import os
 
 def create_app():
     app = Flask(__name__)
