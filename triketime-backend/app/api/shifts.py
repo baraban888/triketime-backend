@@ -3,12 +3,12 @@ from datetime import datetime, timezone
 from app.db import get_db
 
 shifts_bp = Blueprint("shifts", __name__, url_prefix="/api")
-
 db = get_db()
 
 def now_iso() -> str:
     """Текущий момент в ISO-формате UTC (как в мобильном приложении)."""
     return datetime.now(timezone.utc).isoformat()
+
 def parse_iso(ts: str) -> datetime:
     # поддержка "Z" от Android: 2025-...T...Z
     if ts.endswith("Z"):
@@ -16,12 +16,10 @@ def parse_iso(ts: str) -> datetime:
     return datetime.fromisoformat(ts)
 
 def current_shift_doc():
-    db = get_db()
-    # один документ состояния
+    # один документ состояния   
     return db.collection("state").document("currentShift")
 
 def shifts_collection():
-    db = get_db()
     return db.collection("shifts")
 
 # ====== API: Текущая смена ======
