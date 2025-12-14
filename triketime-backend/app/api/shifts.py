@@ -1,224 +1,131 @@
-from flask import Blueprint, jsonify
-from datetime import datetime
+from flask import Blueprint, request, jsonify
+from datetime import datetime, timezone
+from app.db import get_db
 
-shifts_bp = Blueprint("shifts", __name__, url_prefix="/api/shifts")
+shifts_bp = Blueprint("shifts", __name__, url_prefix="/api")
 
-# ВРЕМЕННО: храним данные в памяти (пока без базы)
-SHIFTS = []
-NEXT_ID = 1
+db = get_db()
 
-def _calc_duration_seconds(start_iso, end_iso):
-    """Посчитать длительность в секундах между двумя ISO-датами."""
-    # убираем 'Z' в конце, чтобы fromisoformat не ругался
-    start = datetime.fromisoformat(start_iso.replace("Z", ""))
-    end = datetime.fromisoformat(end_iso.replace("Z", ""))
-    return int((end - start).total_seconds())
+def now_iso() -> str:
+    """Текущий момент в ISO-формате UTC (как в мобильном приложении)."""
+    return datetime.now(timezone.utc).isoformat()
+def parse_iso(ts: str) -> datetime:
+    # поддержка "Z" от Android: 2025-...T...Z
+    if ts.endswith("Z"):
+        ts = ts.replace("Z", "+00:00")
+    return datetime.fromisoformat(ts)
 
+def current_shift_doc():
+    db = get_db()
+    # один документ состояния
+    return db.collection("state").document("currentShift")
+
+def shifts_collection():
+    db = get_db()
+    return db.collection("shifts")
+
+# ====== API: Текущая смена ======
+
+@shifts_bp.route("/shift/current", methods=["GET"])
 def get_current_shift():
-    """Вернуть текущую активную смену (status == running) или None."""
-    for shift in SHIFTS:
-        if shift["status"] == "running":
-            return shift
-    return None
+    doc = current_shift_doc().get()
+    if not doc.exists:
+        return jsonify({"status": "ok", "message": "No active shift", "shift": None})
 
-def get_current_event(shift):
-    """Вернуть текущее активное событие (drive/break), если есть."""
-    if "events" not in shift:
-        shift["events"] = []
-        return None
+    shift = doc.to_dict()
+    if not shift or shift.get("status") != "ACTIVE":
+        return jsonify({"status": "ok", "message": "No active shift", "shift": None})
 
-    for event in shift["events"]:
-        if event["ended_at"] is None:
-            return event
+    return jsonify({"status": "ok", "message": "Shift is active", "shift": shift})
 
-    return None
+# ====== API: Start shift ======
 
-def start_event(shift, event_type):
-    """Создать новое событие (drive или break)."""
-    if "events" not in shift:
-        shift["events"] = []
-
-    now = datetime.utcnow().isoformat() + "Z"
-    event = {
-        "type": event_type,
-        "started_at": now,
-        "ended_at": None,
-    }
-    shift["events"].append(event)
-    return event
-
-def stop_event(shift):
-    """Остановить текущее активное событие, если оно есть."""
-    event = get_current_event(shift)
-    if event is None:
-        return None
-
-    now = datetime.utcnow().isoformat() + "Z"
-    event["ended_at"] = now
-    # добавляем длительность
-    event["duration_seconds"] = _calc_duration_seconds(event["started_at"], now)
-    return event
-
-@shifts_bp.get("/")
-def list_shifts():
-    """Вернуть все смены (пока из памяти)."""
-    return jsonify(SHIFTS), 200
-
-
-@shifts_bp.post("/start")
+@shifts_bp.route("/shift/start", methods=["POST"])
 def start_shift():
-    """Начать смену, если сейчас нет активной."""
-    global NEXT_ID
+    data = request.get_json(silent=True) or {}
+    ts = data.get("timestamp") or now_iso()
 
-    current = get_current_shift()
-    if current is not None:
-        return (
-            jsonify(
-                {
-                    "error": "shift_already_running",
-                    "message": "Смена уже запущена, сначала останови текущую.",
-                    "current_shift_id": current["id"],
-                }
-            ),
-            400,
-        )
+    doc_ref = current_shift_doc()
+    doc = doc_ref.get()
+    if doc.exists:
+        existing = doc.to_dict() or {}
+        if existing.get("status") == "ACTIVE":
+            return jsonify({"status": "error", "message": "Shift already active", "shift": existing}), 400
 
-    now = datetime.utcnow().isoformat() + "Z"
-
+    # создаём новый id (можно uuid, но пусть будет doc id из Firestore)
+    new_ref = shifts_collection().document()
     shift = {
-        "id": NEXT_ID,
-        "started_at": now,
-        "ended_at": None,
-        "status": "running",
+        "id": new_ref.id,
+        "status": "ACTIVE",
+        "startedAt": ts,
+        "endedAt": None,
+        "durationSeconds": None,
     }
-    NEXT_ID += 1
-    SHIFTS.append(shift)
 
-    return jsonify(shift), 201
+    # пишем и в историю, и в "current"
+    new_ref.set(shift)
+    doc_ref.set(shift)
 
-@shifts_bp.post("/stop")
+    return jsonify({"status": "ok", "message": "Shift started", "shift": shift})
+
+# ====== API: Stop shift ======
+
+@shifts_bp.route("/shift/stop", methods=["POST"])
 def stop_shift():
-    """Остановить текущую активную смену, если нет активных событий."""
-    current = get_current_shift()
-    if current is None:
-        return jsonify({
-            "error": "no_running_shift",
-            "message": "Нет активной смены для остановки."
-        }), 400
+    data = request.get_json(silent=True) or {}
+    end_ts = data.get("timestamp") or now_iso()
 
-    if has_active_event(current):
-        return jsonify({
-            "error": "active_event_running",
-            "message": "Нельзя остановить смену, пока идёт drive или break. Сначала останови все события."
-        }), 400
+    doc_ref = current_shift_doc()
+    doc = doc_ref.get()
+    if not doc.exists:
+        return jsonify({"status": "error", "message": "No active shift to stop", "shift": None}), 400
 
-    now = datetime.utcnow().isoformat() + "Z"
-    current["ended_at"] = now
-    current["status"] = "finished"
-    current["duration_seconds"] = _calc_duration_seconds(current["started_at"], now)
+    shift = doc.to_dict() or {}
+    if shift.get("status") != "ACTIVE":
+        return jsonify({"status": "error", "message": "No active shift to stop", "shift": None}), 400
 
-    return jsonify(current), 200
+    # duration
+    try:
+        started = parse_iso(shift["startedAt"])
+        ended = parse_iso(end_ts)
+        duration = int((ended - started).total_seconds())
+    except Exception:
+        duration = None
 
-@shifts_bp.post("/drive/start")
-def drive_start():
-    shift = get_current_shift()
-    if shift is None:
-        return jsonify({"error": "no_shift", "message": "Смена не запущена"}), 400
+    finished = {
+        **shift,
+        "status": "FINISHED",
+        "endedAt": end_ts,
+        "durationSeconds": duration,
+    }
 
-    current_event = get_current_event(shift)
-    if current_event is not None:
-        return jsonify({
-            "error": "event_already_running",
-            "message": f"Нельзя начать drive. Сейчас идёт {current_event['type']}.",
-            "current_event": current_event
-        }), 400
-    def has_active_event(shift):
-        """Проверить, есть ли в смене активное событие (drive/break)."""
-        if "events" not in shift:
-            return False
+    # обновим историю (если id есть)
+    shift_id = finished.get("id")
+    if shift_id:
+        shifts_collection().document(shift_id).set(finished, merge=True)
 
-    for event in shift["events"]:
-        if event["ended_at"] is None:
-            return True
+    # удаляем currentShift => больше нет активной смены
+    doc_ref.delete()
 
-    return False
+    return jsonify({"status": "ok", "message": "Shift stopped", "shift": finished})
 
-    event = start_event(shift, "drive")
-    return jsonify(event), 201
+# ====== Заглушки для drive/break (можно потом доработать аналогично) ======
 
-@shifts_bp.post("/break/start")
-def break_start():
-    shift = get_current_shift()
-    if shift is None:
-        return jsonify({"error": "no_shift", "message": "Смена не запущена"}), 400
-
-    current_event = get_current_event(shift)
-    if current_event is not None:
-      return jsonify({
-        "error": "event_already_running",
-        "message": f"Нельзя начать break. Сейчас идёт {current_event['type']}.",
-        "current_event": current_event
-    }), 400
-
-    event = start_event(shift, "break")
-    return jsonify(event), 201
-
-@shifts_bp.post("/drive/stop")
-def drive_stop():
-    shift = get_current_shift()
-    if shift is None:
-        return jsonify({"error": "no_shift", "message": "Смена не запущена"}), 400
-
-    event = get_current_event(shift)
-    if event is None or event["type"] != "drive":
-        return jsonify({
-          "error": "no_active_drive",
-          "message": "Нельзя остановить вождение — оно не начато."
-    }), 400
-    stopped = stop_event(event)
-    return jsonify(stopped), 200
+@shifts_bp.route("/drive/start", methods=["POST"])
+def start_drive():
+    return jsonify({"status": "ok", "message": "Drive started"})
 
 
-@shifts_bp.post("/break/stop")
-def break_stop():
-    shift = get_current_shift()
-    if shift is None:
-        return jsonify({
-          "error": "no_active_break",
-          "message": "Нельзя остановить перерыв — он не начат."
-    }), 400
+@shifts_bp.route("/drive/stop", methods=["POST"])
+def stop_drive():
+    return jsonify({"status": "ok", "message": "Drive/Break stopped"})
 
-    event = get_current_event(shift)
-    if event is None or event["type"] != "break":
-        return jsonify({"error": "no_event", "message": "Нет активного перерыва"}), 400
 
-    stopped = stop_event(event)
-    return jsonify(stopped), 200
+@shifts_bp.route("/break/start", methods=["POST"])
+def start_break():
+    return jsonify({"status": "ok", "message": "Break started"})
 
-@shifts_bp.get("/current")
-def current_shift():
-    """Вернуть текущую активную смену, если есть."""
-    current = get_current_shift()
-    if current is None:
-        return (
-            jsonify(
-                {
-                    "active": False,
-                    "message": "Сейчас нет активной смены.",
-                }
-            ),
-            200,
-        )
 
-    return jsonify(
-        {
-            "active": True,
-            "shift": current,
-        }
-    ), 200
-
-@shifts_bp.get("/history")
-def shifts_history():
-    """Вернуть только завершённые смены (status == finished)."""
-    finished = [s for s in SHIFTS if s.get("status") == "finished"]
-    return jsonify(finished), 200
+@shifts_bp.route("/break/stop", methods=["POST"])
+def stop_break():
+    return jsonify({"status": "ok", "message": "Break stopped"})

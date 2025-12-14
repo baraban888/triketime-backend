@@ -1,2 +1,5 @@
-flask
+Flask
 gunicorn
+python-dotenv
+google-cloud-firestore
+
