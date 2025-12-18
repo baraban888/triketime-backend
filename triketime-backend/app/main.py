@@ -10,8 +10,8 @@ def create_app():
     app = Flask(__name__)
 
     # регистрируем blueprints
-    app.register_blueprint(health_bp)
-    app.register_blueprint(shifts_bp)
+    app.register_blueprint(health_bp, url_prefix="/api")
+    app.register_blueprint(shifts_bp, url_prefix="/api")
 
     @app.get("/")
     def index():

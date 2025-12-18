@@ -1,9 +1,9 @@
+import uuid
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timezone
 from app.db import get_db
 
-shifts_bp = Blueprint("shifts", __name__, url_prefix="/api")
-db = get_db()
+shifts_bp = Blueprint("shifts", __name__)
 
 def now_iso() -> str:
     """Текущий момент в ISO-формате UTC (как в мобильном приложении)."""
@@ -17,9 +17,11 @@ def parse_iso(ts: str) -> datetime:
 
 def current_shift_doc():
     # один документ состояния   
+    db = get_db()
     return db.collection("state").document("currentShift")
 
 def shifts_collection():
+    db = get_db()
     return db.collection("shifts")
 
 # ====== API: Текущая смена ======
@@ -40,74 +42,73 @@ def get_current_shift():
 
 @shifts_bp.route("/shift/start", methods=["POST"])
 def start_shift():
-    data = request.get_json(silent=True) or {}
-    ts = data.get("timestamp") or now_iso()
-
     doc_ref = current_shift_doc()
-    doc = doc_ref.get()
-    if doc.exists:
-        existing = doc.to_dict() or {}
-        if existing.get("status") == "ACTIVE":
-            return jsonify({"status": "error", "message": "Shift already active", "shift": existing}), 400
+    snap = doc_ref.get()
 
-    # создаём новый id (можно uuid, но пусть будет doc id из Firestore)
-    new_ref = shifts_collection().document()
+    if snap.exists:
+        cur = snap.to_dict() or {}
+        if cur.get("status") == "ACTIVE":
+            return jsonify({"status": "ok", "message": "Shift already active", "shift": cur}), 200
+
+    shift_id = str(uuid.uuid4())
+    started_at = now_iso()
+
     shift = {
-        "id": new_ref.id,
+        "id": shift_id,
         "status": "ACTIVE",
-        "startedAt": ts,
+        "startedAt": started_at,
         "endedAt": None,
-        "durationSeconds": None,
     }
 
-    # пишем и в историю, и в "current"
-    new_ref.set(shift)
+    # пишем историю
+    shifts_collection().document(shift_id).set(shift)
+    # пишем текущее состояние
     doc_ref.set(shift)
 
-    return jsonify({"status": "ok", "message": "Shift started", "shift": shift})
+    return jsonify({"status": "ok", "message": "Shift started", "shift": shift}), 200
 
 # ====== API: Stop shift ======
 
 @shifts_bp.route("/shift/stop", methods=["POST"])
 def stop_shift():
-    data = request.get_json(silent=True) or {}
-    end_ts = data.get("timestamp") or now_iso()
-
     doc_ref = current_shift_doc()
-    doc = doc_ref.get()
-    if not doc.exists:
-        return jsonify({"status": "error", "message": "No active shift to stop", "shift": None}), 400
+    snap = doc_ref.get()
 
-    shift = doc.to_dict() or {}
-    if shift.get("status") != "ACTIVE":
-        return jsonify({"status": "error", "message": "No active shift to stop", "shift": None}), 400
+    if not snap.exists:
+        return jsonify({"status": "ok", "message": "No active shift", "shift": None}), 200
 
-    # duration
+    cur = snap.to_dict() or {}
+    if cur.get("status") != "ACTIVE":
+        return jsonify({"status": "ok", "message": "Shift already stopped", "shift": cur}), 200
+
+    ended_at = now_iso()
+    started_at = cur.get("startedAt")
+    shift_id = cur.get("id")
+
+    # duration (секунды)
+    duration_sec = None
     try:
-        started = parse_iso(shift["startedAt"])
-        ended = parse_iso(end_ts)
-        duration = int((ended - started).total_seconds())
+        if started_at:
+            dt_start = datetime.fromisoformat(started_at)
+            dt_end = datetime.fromisoformat(ended_at)
+            duration_sec = int((dt_end - dt_start).total_seconds())
     except Exception:
-        duration = None
+        pass
 
-    finished = {
-        **shift,
-        "status": "FINISHED",
-        "endedAt": end_ts,
-        "durationSeconds": duration,
-    }
+    cur["status"] = "STOPPED"
+    cur["endedAt"] = ended_at
+    cur["durationSec"] = duration_sec
 
-    # обновим историю (если id есть)
-    shift_id = finished.get("id")
+    # обновляем историю
     if shift_id:
-        shifts_collection().document(shift_id).set(finished, merge=True)
+        shifts_collection().document(shift_id).set(cur, merge=True)
 
-    # удаляем currentShift => больше нет активной смены
-    doc_ref.delete()
+    # обновляем текущее состояние
+    doc_ref.set(cur, merge=True)
 
-    return jsonify({"status": "ok", "message": "Shift stopped", "shift": finished})
+    return jsonify({"status": "ok", "message": "Shift stopped", "shift": cur}), 200
 
-# ====== Заглушки для drive/break (можно потом доработать аналогично) ======
+# ====== API: Drive/Break actions ======
 
 @shifts_bp.route("/drive/start", methods=["POST"])
 def start_drive():
