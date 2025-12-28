@@ -54,6 +54,19 @@ def create_shift():
 
     return jsonify({"status": "ok"}), 201
 
+@shifts_bp.get("/shifts")
+def list_shifts():
+    db = get_db()
+    docs = db.collection("shifts").order_by("start").stream()
+
+    result = []
+    for d in docs:
+        item = d.to_dict()
+        item["id"] = d.id
+        result.append(item)
+
+    return jsonify(result)
+
 # ====== API: Текущая смена ======
 
 @shifts_bp.route("/shift/current", methods=["GET"])
