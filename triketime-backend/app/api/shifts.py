@@ -35,7 +35,24 @@ def shifts_collection():
     db = get_db()
     return db.collection("shifts")
 
+@shifts_bp.post("/shifts")
+def create_shift():
+    data = request.get_json(force=True)
 
+    required = ("type", "start", "end")
+    if not all(k in data for k in required):
+        return jsonify({"error": "missing fields"}), 400
+
+    db = get_db()
+    doc = {
+        "type": data["type"],
+        "start": data["start"],
+        "end": data["end"],
+        "createdAt": datetime.utcnow().isoformat()
+    }
+    db.collection("shifts").add(doc)
+
+    return jsonify({"status": "ok"}), 201
 
 # ====== API: Текущая смена ======
 

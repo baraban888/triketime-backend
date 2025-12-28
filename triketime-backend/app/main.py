@@ -10,9 +10,12 @@ load_dotenv()
 def create_app():
     app = Flask(__name__)
 
+    allowed = os.getenv("ALLOWED_ORIGINS", "")
+    origins = [o.strip() for o in allowed.split(",") if o.strip()]
+    
     CORS(app, resources={
         r"/api/*": {
-            "origins": "*"
+            "origins": origins or "*"
         }
     })
     # регистрируем blueprints

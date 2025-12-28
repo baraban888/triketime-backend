@@ -14,5 +14,5 @@ ENV PORT=8080
 # или "app.main:create_app"
 
 # Должно быть:
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "app.main:app"]
+CMD ["sh","-c", "gunicorn", "-b", "0.0.0.0:${PORT}", "app.main:app"]
 #                          модуль ^   ^ имя переменной Flask-приложения
