@@ -8,7 +8,4 @@ def create_app():
 
     CORS(app)  # чтобы PWA не страдал
 
-    from .api import api_bp
-    app.register_blueprint(api_bp, url_prefix="/api")
-
     return app

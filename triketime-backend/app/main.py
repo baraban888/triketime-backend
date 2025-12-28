@@ -4,6 +4,7 @@ from app.api.shifts import shifts_bp
 from dotenv import load_dotenv
 import os
 from flask_cors import CORS
+from app.api import api_bp
 
 load_dotenv()
 
@@ -19,9 +20,10 @@ def create_app():
         }
     })
     # регистрируем blueprints
-    app.register_blueprint(health_bp, url_prefix="/api")
-    app.register_blueprint(shifts_bp, url_prefix="/api")
-
+    #app.register_blueprint(health_bp, url_prefix="/api")
+    #app.register_blueprint(shifts_bp, url_prefix="/api")
+    app.register_blueprint(api_bp, url_prefix="/api")
+    
     @app.get("/")
     def index():
         return {"message": "TrikeTime Backend is running"}
