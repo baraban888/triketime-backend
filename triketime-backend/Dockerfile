@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["/app/start.sh"]
+CMD ["sh", "/app/start.sh"]
 #ENV PORT=8080
 #CMD ["sh", "-c", "gunicorn -b :$PORT app.main:app"]
 #CMD ["gunicorn", "-b", ":$PORT", "wsgi:app"]
