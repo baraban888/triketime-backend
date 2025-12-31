@@ -1,4 +1,4 @@
 #!/bin/sh
 set -e
 
-exec gunicorn --bind ":{PORT}" app.main:app
+exec gunicorn --bind ":${PORT}" app.main:app

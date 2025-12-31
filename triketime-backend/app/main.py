@@ -23,7 +23,7 @@ def create_app():
     #app.register_blueprint(health_bp, url_prefix="/api")
     #app.register_blueprint(shifts_bp, url_prefix="/api")
     app.register_blueprint(api_bp, url_prefix="/api")
-    
+
     @app.get("/")
     def index():
         return {"message": "TrikeTime Backend is running"}

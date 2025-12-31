@@ -46,26 +46,27 @@ def create_shift():
     db = get_db()
     doc = {
         "type": data["type"],
-        "start": data["start"],
-        "end": data["end"],
+        "driverId": data.get("driverId", "demo"),
+        "startedAt": data["start"],
+        "endedAt": data["end"],
         "createdAt": datetime.utcnow().isoformat()
     }
     db.collection("shifts").add(doc)
 
     return jsonify({"status": "ok"}), 201
 
-@shifts_bp.get("/shifts")
-def list_shifts():
-    db = get_db()
-    docs = db.collection("shifts").order_by("start").stream()
+#@shifts_bp.get("/shifts")
+#def list_shifts():
+    #db = get_db()
+    #docs = db.collection("shifts").order_by("start").stream()
 
-    result = []
-    for d in docs:
-        item = d.to_dict()
-        item["id"] = d.id
-        result.append(item)
+    #result = []
+    #for d in docs:
+        #item = d.to_dict()
+        #item["id"] = d.id
+        #result.append(item)
 
-    return jsonify(result)
+    #return jsonify(result)
 
 # ====== API: Текущая смена ======
 
@@ -163,7 +164,7 @@ def stop_break():
     return jsonify({"status": "ok", "message": "Break stopped"})
 
 @shifts_bp.route("/shifts", methods=["GET"])
-def list_shifts():
+def list_shifts_by_driver():
     driver_id = request.args.get("driverId") or "demo"
     limit = int(request.args.get("limit", 20))
 

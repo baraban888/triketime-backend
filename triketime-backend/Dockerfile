@@ -7,12 +7,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV PORT=8080
-
-# Было (неправильно):
-# CMD ["gunicorn", "-b", "0.0.0.0:8080", "app.main:create_app()"]
-# или "app.main:create_app"
-
-# Должно быть:
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "app.main:app"]
+CMD ["/app/start.sh"]
+#ENV PORT=8080
+#CMD ["sh", "-c", "gunicorn -b :$PORT app.main:app"]
+#CMD ["gunicorn", "-b", ":$PORT", "wsgi:app"]
+#CMD ["gunicorn", "-b :$PORT app.main:app"]
+#CMD ["sh","-c","python -c 'import os; print(\"PORT=\", os.environ.get(\"PORT\"))' && python -c 'import app.main; print(\"import app.main OK\")' && gunicorn -b :$PORT app.main:app --log-level debug --access-logfile - --error-logfile -"]
 #                          модуль ^   ^ имя переменной Flask-приложения
